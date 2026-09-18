@@ -345,25 +345,26 @@ def loot_icon(label: str, config: Dict[str, Any]) -> str:
         return str(custom[label])
     low = label.lower()
     if any(x in low for x in ("rifle", "smg", "shotgun", "pistol", "lmg")):
-        return "🔫"
+        return ""
     if any(x in low for x in ("armor", "mask", "gloves", "holster", "kneepads", "backpack")):
-        return "🛡️"
-    return "🎯"
+        return ""
+    return ""
 
 
 def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     lines = []
     for row in event["missions"]:
         icon = loot_icon(row["loot"], config)
-        lines.append(f"**{row['mission']}**\n{icon} {row['loot']}")
+        prefix = f"{icon} " if icon else ""
+        lines.append(f"**{row['mission']}**\n{prefix}{row['loot']}")
 
     vendor_lines = [
-        f"📦 Prototype Gear Cache — **{event['prototype_gear_cache']}**",
-        f"🔫 Prototype Weapon Cache — **{event['prototype_weapon_cache']}**",
+        f"Prototype Gear Cache — **{event['prototype_gear_cache']}**",
+        f"Prototype Weapon Cache — **{event['prototype_weapon_cache']}**",
     ]
 
     return {
-        "title": "🟠 Escalation Target Loot",
+        "title": "Escalation Target Loot",
         "url": EVENT_URL,
         "description": f"**Week:** {event['week']}\n**Target Loot Date:** {event['day']}",
         "color": int(config.get("embed_color", 15105570)),
@@ -382,15 +383,15 @@ def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict
         for mod in mods[:25]:
             pct = mod["value"] / mod["max"] * 100
             lines.append(
-                f"🔥 **{mod['name']} — {format_value(mod['value'])}** "
-                f"({pct:.0f}% of max)\n📍 {mod['vendor']}"
+                f"**{mod['name']} — {format_value(mod['value'])}** "
+                f"({pct:.0f}% of max)\n{mod['vendor']}"
             )
         value = "\n\n".join(lines)
     else:
         value = "No vendor gear mods met the configured high-roll threshold."
 
     return {
-        "title": "🔥 High Gear Mods",
+        "title": "High Gear Mods",
         "url": VENDOR_URL,
         "description": value[:4096],
         "color": int(config.get("embed_color", 15105570)),
