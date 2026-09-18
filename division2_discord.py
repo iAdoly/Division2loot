@@ -98,6 +98,83 @@ LOOT_AR = {
     "Kneepads": "واقيات الركبة",
 }
 
+BRAND_SET_AR = {
+    "5.11 Tactical": "5.11 تكتيكي",
+    "Badger Tuff": "بادجر تاف",
+    "Belstone Armory": "مستودع أسلحة Belstone",
+    "Brazos de Arcabuz": "«برازوس دي أركابوس»",
+    "Gila Guard": "غيلا غارد",
+    "Improvised": "مرتجل",
+    "Golan Gear Ltd": "شركة غولان المحدودة",
+    "Habsburg Guard": "حرس هابسبورغ",
+    "Lengmo": "لينغمو",
+    "Palisade Steelworks": "مصانع الصلب الحاجز",
+    "Uzina Getica": "أوزينا جيتيكا",
+    "Yaahl Gear": "عتاد ياهل",
+    "Alps Summit Armaments": "تسليح قمة جبال الألب",
+    "China Light Industries": "شركة الصناعات الصينية الخفيفة",
+    "Edelweiss GPz": "«إيدلفايس» GPz",
+    "Electrique": "الكهربائي",
+    "Empress International": "الإمبراطورة العالمية",
+    "Hana-U Corporation": "مؤسسة هانا-يو",
+    "Murakami Industries": "مصانع موراكامي",
+    "Richter & Kaiser GmbH": "«ريختر وكايزر» GmbH",
+    "Shiny Monkey": "عتاد القرد اللامع",
+    "Wyvern Wear": "وايفرن وير",
+    "Airaldi Holdings": "إيرالدي هولدينغز",
+    "Unit Alloys": "سبائك الوحدة",
+    "Ceska Vyroba s.r.o.": "شركة الإنتاج التشيكي المحدودة",
+    "Douglas & Harding": "«دوغلاس وهاردينغ»",
+    "Fenris Group AB": "مجموعة فينريس AB",
+    "Grupo Sombra S.A.": "المجموعة العامة المحدودة سومبرا",
+    "Imminence Armaments": "«إيمينينس أرمامنتس» (AI)",
+    "Legatus S.p.A": "«ليغاتوس» S.p.A",
+    "Overlord Armaments": "أوفرلورد أرمامنتس",
+    "Petrov Defense Group": "مجموعة بتروف للدفاع",
+    "Providence Defense": "بروفيدانس ديفينس",
+    "Sokolov Concern": "تهديد «سكولفو»",
+    "Urban Lookout": "المراقب المدني",
+    "Royal Works": "المشروعات الملكية",
+    "Walker, Harris & Co.": "ووكر وهاريس وشركائهما",
+    "Zwiadowka Sp. z o.o.": "Zwiadowka Sp. z o.o.",
+}
+
+GEAR_SET_AR = {
+    "Aces & Eights": "آحاد وثمانيات",
+    "Aegis": "إيجيس",
+    "Breaking Point": "حد الانهيار",
+    "Cavalier": "الفارس",
+    "Concentrated Company": "المجموعة المركزية",
+    "Core Strength": "قوة السمة الأساسية",
+    "Eclipse Protocol": "بروتوكول الكسوف",
+    "Ember Engine": "محرك الجمر",
+    "Foundry Bulwark": "الدرع المحصن المسبك",
+    "Future Initiative": "مبادرة مستقبلية",
+    "Hard Wired": "غير قابل للتعديل",
+    "Heartbreaker": "محطم القلوب",
+    "Hotshot": "إصابة في الرأس",
+    "Hunter's Fury": "غضب الصياد",
+    "Measured Assembly": "التجمع المدروس (MA)",
+    "Negotiator's Dilemma": "معضلة المفاوض",
+    "Ongoing Directive": "التوجيهات الحالية",
+    "Ortiz: Exuro": "إكسورو",
+    "Ortiz: Reficere": "«أورتيز»: إعادة الترميم",
+    "Refactor": "إعادة تنظيم",
+    "Rigger": "عامل فني",
+    "Striker's Battlegear": "عتاد سترايكر القتالي",
+    "Tip of the Spear": "رأس الحربة",
+    "Tipping Scales": "اختلال الموازين",
+    "True Patriot": "الوطني الحق",
+    "Umbra Initiative": "مبادرة «أومبرا»",
+    "Virtuoso": "فيرتشوسو",
+}
+
+LOOT_NAME_ALIASES = {
+    "China Light Industries Corporation": "China Light Industries",
+    "Legatus S.p.A.": "Legatus S.p.A",
+    "Česká Výroba s.r.o.": "Ceska Vyroba s.r.o.",
+}
+
 VENDOR_AR = {
     "White House": "البيت الأبيض",
     "Clan": "العشيرة",
@@ -198,12 +275,14 @@ def stable_hash(value: Any) -> str:
 
 def normalize_label(value: Any) -> str:
     raw = str(value or "").strip()
-    return TOKEN_LABELS.get(raw.lower(), raw or "N/A")
+    label = TOKEN_LABELS.get(raw.lower(), raw or "N/A")
+    return LOOT_NAME_ALIASES.get(label, label)
 
 
 def bilingual_loot(label: str) -> str:
-    ar = LOOT_AR.get(label)
-    return f"{ar} | {label}" if ar else label
+    canonical = LOOT_NAME_ALIASES.get(label, label)
+    ar = LOOT_AR.get(canonical) or BRAND_SET_AR.get(canonical) or GEAR_SET_AR.get(canonical)
+    return f"{ar} | {canonical}" if ar else canonical
 
 
 def bilingual_mod(name: str) -> str:
@@ -475,10 +554,14 @@ def format_value(value: float, mod_name: str) -> str:
 
 
 def loot_icon(label: str, config: Dict[str, Any]) -> str:
+    canonical = LOOT_NAME_ALIASES.get(label, label)
     custom = config.get("loot_emojis", {})
-    if isinstance(custom, dict) and label in custom:
-        return str(custom[label])
-    low = label.lower()
+    if isinstance(custom, dict):
+        if canonical in custom:
+            return str(custom[canonical])
+        if label in custom:
+            return str(custom[label])
+    low = canonical.lower()
     if any(x in low for x in ("rifle", "smg", "shotgun", "pistol", "lmg")):
         return ""
     if any(x in low for x in ("armor", "mask", "gloves", "holster", "kneepads", "backpack")):
