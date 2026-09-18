@@ -84,6 +84,27 @@ ALIASES = {
 PERCENT_RE = re.compile(r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*%")
 NUMBER_RE = re.compile(r"(?<!\d)(\d{1,5}(?:\.\d+)?)(?!\d)")
 
+# Armor/gear mods only. These labels are used to prove that a stat belongs to
+# an actual Gear Mod card/item and not to an attribute rolled on normal gear.
+GEAR_MOD_MARKERS = (
+    "gear mod",
+    "gear-mod",
+    "gear system mod",
+    "gear protocol mod",
+    "offensive system",
+    "defensive system",
+    "utility system",
+    "offensive protocol",
+    "defensive protocol",
+    "utility protocol",
+)
+
+# Explicitly exclude mods that belong to skills themselves.
+SKILL_MOD_MARKERS = (
+    "skill mod",
+    "skill-mod",
+)
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -170,6 +191,13 @@ def canonical_mod_name(text: str) -> Optional[str]:
     return None
 
 
+def is_gear_mod_context(text: str) -> bool:
+    lower = text.lower()
+    if any(marker in lower for marker in SKILL_MOD_MARKERS):
+        return False
+    return any(marker in lower for marker in GEAR_MOD_MARKERS)
+
+
 def extract_percent(text: str, mod_name: str) -> Optional[float]:
     max_value = MOD_MAX[mod_name]
     values = [float(x) for x in PERCENT_RE.findall(text)]
@@ -191,6 +219,12 @@ def collect_from_json(payloads: List[Tuple[str, Any]], ratio: float, thresholds:
             if not isinstance(node, dict):
                 continue
             blob = json.dumps(node, ensure_ascii=False)
+
+            # A stat name by itself is not enough: CHD/CHC/Skill Haste etc.
+            # can also appear as normal attributes. Only accept actual Gear Mods.
+            if not is_gear_mod_context(blob):
+                continue
+
             mod_name = canonical_mod_name(blob)
             if not mod_name:
                 continue
@@ -229,7 +263,13 @@ def collect_from_text(text: str, ratio: float, thresholds: Dict[str, float]) -> 
         mod_name = canonical_mod_name(line)
         if not mod_name:
             continue
-        window = " | ".join(lines[max(0, i - 2): min(len(lines), i + 4)])
+
+        # Include the nearby card/type label. The stat is accepted only when
+        # the same card is clearly identified as a Gear Mod.
+        window = " | ".join(lines[max(0, i - 8): min(len(lines), i + 6)])
+        if not is_gear_mod_context(window):
+            continue
+
         value = extract_percent(window, mod_name)
         if value is None:
             continue
@@ -350,11 +390,11 @@ def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict
         value = "No vendor gear mods met the configured high-roll threshold."
 
     return {
-        "title": "🔥 High Vendor Mods",
+        "title": "🔥 High Gear Mods",
         "url": VENDOR_URL,
         "description": value[:4096],
         "color": int(config.get("embed_color", 15105570)),
-        "footer": {"text": "Vendor mods only • Source: hi-dep Division 2"},
+        "footer": {"text": "Armor Gear Mods only • Skill Mods excluded • Source: hi-dep Division 2"},
         "timestamp": utc_now().isoformat(),
     }
 
