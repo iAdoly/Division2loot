@@ -81,6 +81,25 @@ ALIASES = {
     "repair skills": "Repair Skills",
 }
 
+GEAR_MOD_IDS = {
+    "Critical Hit Chance": "critical-hit-chance-gear-mod",
+    "Critical Hit Damage": "critical-hit-damage-gear-mod",
+    "Headshot Damage": "headshot-damage-gear-mod",
+    "Protection from Elites": "protection-from-elites-gear-mod",
+    "Burn Resistance": "burn-resistance-gear-mod",
+    "Bleed Resistance": "bleed-resistance-gear-mod",
+    "Shock Resistance": "shock-resistance-gear-mod",
+    "Disrupt Resistance": "disrupt-resistance-gear-mod",
+    "Blind/Deaf Resistance": "blind-deaf-resistance-gear-mod",
+    "Disorient Resistance": "disorient-resistance-gear-mod",
+    "Ensnare Resistance": "ensnare-resistance-gear-mod",
+    "Pulse Resistance": "pulse-resistance-gear-mod",
+    "Incoming Repairs": "incoming-repairs-gear-mod",
+    "Skill Haste": "skill-haste-gear-mod",
+    "Skill Duration": "skill-duration-gear-mod",
+    "Repair Skills": "repair-skills-gear-mod",
+}
+
 PERCENT_RE = re.compile(r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*%")
 NUMBER_RE = re.compile(r"(?<!\d)(\d{1,5}(?:\.\d+)?)(?!\d)")
 
@@ -191,10 +210,25 @@ def canonical_mod_name(text: str) -> Optional[str]:
     return None
 
 
-def is_gear_mod_context(text: str) -> bool:
+def is_gear_mod_context(text: str, mod_name: Optional[str] = None) -> bool:
     lower = text.lower()
+
+    # Never accept skill attachment mods (drone/turret/hive/etc.).
     if any(marker in lower for marker in SKILL_MOD_MARKERS):
         return False
+
+    # Best signal: the structured data says compatibility is gear-mod.
+    if '"compatibility": "gear-mod"' in lower or '"compatibility":"gear-mod"' in lower:
+        return True
+
+    # Also accept the canonical gear-mod ID for the stat, e.g.
+    # skill-haste-gear-mod. This is what prevents Skill Haste from being missed.
+    if mod_name:
+        mod_id = GEAR_MOD_IDS.get(mod_name, "")
+        if mod_id and mod_id in lower:
+            return True
+
+    # Fallback for rendered text/card labels.
     return any(marker in lower for marker in GEAR_MOD_MARKERS)
 
 
@@ -220,13 +254,14 @@ def collect_from_json(payloads: List[Tuple[str, Any]], ratio: float, thresholds:
                 continue
             blob = json.dumps(node, ensure_ascii=False)
 
-            # A stat name by itself is not enough: CHD/CHC/Skill Haste etc.
-            # can also appear as normal attributes. Only accept actual Gear Mods.
-            if not is_gear_mod_context(blob):
-                continue
-
             mod_name = canonical_mod_name(blob)
             if not mod_name:
+                continue
+
+            # A stat name by itself is not enough: CHD/CHC/Skill Haste etc.
+            # can also appear as normal attributes. Require structured gear-mod
+            # compatibility, the canonical gear-mod ID, or a clear gear-mod label.
+            if not is_gear_mod_context(blob, mod_name):
                 continue
             value = extract_percent(blob, mod_name)
             if value is None:
@@ -267,7 +302,7 @@ def collect_from_text(text: str, ratio: float, thresholds: Dict[str, float]) -> 
         # Include the nearby card/type label. The stat is accepted only when
         # the same card is clearly identified as a Gear Mod.
         window = " | ".join(lines[max(0, i - 8): min(len(lines), i + 6)])
-        if not is_gear_mod_context(window):
+        if not is_gear_mod_context(window, mod_name):
             continue
 
         value = extract_percent(window, mod_name)
