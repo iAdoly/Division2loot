@@ -62,6 +62,59 @@ MOD_MAX = {
     "Repair Skills": 20.0,
 }
 
+MOD_AR = {
+    "Critical Hit Chance": "فرصة الضربة الحرجة",
+    "Critical Hit Damage": "ضرر الضربة الحرجة",
+    "Headshot Damage": "ضرر إصابة الرأس",
+    "Armor on Kill": "درع عند القتل",
+    "Protection from Elites": "حماية من النخبة",
+    "Burn Resistance": "مقاومة الحرق",
+    "Bleed Resistance": "مقاومة النزيف",
+    "Shock Resistance": "مقاومة الصعق",
+    "Disrupt Resistance": "مقاومة التعطيل",
+    "Blind/Deaf Resistance": "مقاومة العمى/الصمم",
+    "Disorient Resistance": "مقاومة التشويش",
+    "Ensnare Resistance": "مقاومة التقييد",
+    "Pulse Resistance": "مقاومة النبض",
+    "Incoming Repairs": "الإصلاحات الواردة",
+    "Skill Haste": "سرعة المهارة",
+    "Skill Duration": "مدة المهارة",
+    "Repair Skills": "إصلاح المهارات",
+}
+
+LOOT_AR = {
+    "Assault Rifle": "بندقية هجومية",
+    "LMG": "رشاش خفيف",
+    "Marksman Rifle": "بندقية قنص",
+    "Pistol": "مسدس",
+    "Rifle": "بندقية",
+    "Shotgun": "شوتجن",
+    "SMG": "رشاش خفيف صغير",
+    "Mask": "قناع",
+    "Backpack": "حقيبة ظهر",
+    "Body Armor": "درع الصدر",
+    "Gloves": "قفازات",
+    "Holster": "حافظة",
+    "Kneepads": "واقيات الركبة",
+}
+
+VENDOR_AR = {
+    "White House": "البيت الأبيض",
+    "Clan": "العشيرة",
+    "Countdown": "كاونت داون",
+    "The Campus": "الحرم",
+    "The Theater": "المسرح",
+    "Castle": "القلعة",
+    "Cassie": "كاسي",
+    "DZ East": "المنطقة المظلمة الشرقية",
+    "DZ South": "المنطقة المظلمة الجنوبية",
+    "DZ West": "المنطقة المظلمة الغربية",
+    "Haven": "هافن",
+    "Benitez": "بنيتيز",
+    "Danny": "داني",
+    "Vendor": "البائع",
+}
+
 ALIASES = {
     "critical hit chance": "Critical Hit Chance",
     "critical hit damage": "Critical Hit Damage",
@@ -146,6 +199,21 @@ def stable_hash(value: Any) -> str:
 def normalize_label(value: Any) -> str:
     raw = str(value or "").strip()
     return TOKEN_LABELS.get(raw.lower(), raw or "N/A")
+
+
+def bilingual_loot(label: str) -> str:
+    ar = LOOT_AR.get(label)
+    return f"{ar} | {label}" if ar else label
+
+
+def bilingual_mod(name: str) -> str:
+    ar = MOD_AR.get(name)
+    return f"{ar} | {name}" if ar else name
+
+
+def bilingual_vendor(name: str) -> str:
+    ar = VENDOR_AR.get(name)
+    return f"{ar} | {name}" if ar else name
 
 
 def fetch_event() -> Dict[str, Any]:
@@ -423,21 +491,21 @@ def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str
     for row in event["missions"]:
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
-        lines.append(f"**{row['mission']}**\n{prefix}{row['loot']}")
+        lines.append(f"**{row['mission']}**\n{prefix}{bilingual_loot(row['loot'])}")
 
     vendor_lines = [
-        f"Prototype Gear Cache — **{event['prototype_gear_cache']}**",
-        f"Prototype Weapon Cache — **{event['prototype_weapon_cache']}**",
+        f"صندوق دروع تجريبي | Prototype Gear Cache — **{bilingual_loot(event['prototype_gear_cache'])}**",
+        f"صندوق أسلحة تجريبي | Prototype Weapon Cache — **{bilingual_loot(event['prototype_weapon_cache'])}**",
     ]
 
     return {
-        "title": "Escalation Target Loot",
+        "title": "غنائم التصعيد | Escalation Target Loot",
         "url": EVENT_URL,
-        "description": f"**Week:** {event['week']}\n**Target Loot Date:** {event['day']}",
+        "description": f"**الأسبوع | Week:** {event['week']}\n**تاريخ الغنائم | Target Loot Date:** {event['day']}",
         "color": int(config.get("embed_color", 15105570)),
         "fields": [
-            {"name": "Escalations", "value": "\n\n".join(lines)[:1024] or "No data", "inline": False},
-            {"name": "Escalation Requisition Vendor", "value": "\n".join(vendor_lines)[:1024], "inline": False},
+            {"name": "التصعيدات | Escalations", "value": "\n\n".join(lines)[:1024] or "No data", "inline": False},
+            {"name": "بائع متطلبات التصعيد | Escalation Requisition Vendor", "value": "\n".join(vendor_lines)[:1024], "inline": False},
         ],
         "footer": {"text": "Source: hi-dep Division 2"},
         "timestamp": utc_now().isoformat(),
@@ -448,21 +516,20 @@ def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict
     if mods:
         lines = []
         for mod in mods[:25]:
-            pct = mod["value"] / mod["max"] * 100
             lines.append(
-                f"**{mod['name']} — {format_value(mod['value'], mod['name'])}** "
-                f"({pct:.0f}% of max)\n{mod['vendor']}"
+                f"**{bilingual_mod(mod['name'])} — {format_value(mod['value'], mod['name'])}**\n"
+                f"{bilingual_vendor(mod['vendor'])}"
             )
         value = "\n\n".join(lines)
     else:
-        value = "No vendor gear mods met the configured high-roll threshold."
+        value = "لا توجد مودات دروع مرتفعة حسب الحد المحدد | No high Gear Mods matched the configured threshold."
 
     return {
-        "title": "High Gear Mods",
+        "title": "مودات الدروع العالية | High Gear Mods",
         "url": VENDOR_URL,
         "description": value[:4096],
         "color": int(config.get("embed_color", 15105570)),
-        "footer": {"text": "Armor Gear Mods only • Skill Mods excluded • Source: hi-dep Division 2"},
+        "footer": {"text": "مودات الدروع فقط | Gear Mods only • Source: hi-dep Division 2"},
         "timestamp": utc_now().isoformat(),
     }
 
