@@ -46,6 +46,7 @@ MOD_MAX = {
     "Critical Hit Chance": 6.0,
     "Critical Hit Damage": 12.0,
     "Headshot Damage": 10.0,
+    "Armor on Kill": 18935.0,
     "Protection from Elites": 13.0,
     "Burn Resistance": 10.0,
     "Bleed Resistance": 10.0,
@@ -65,6 +66,7 @@ ALIASES = {
     "critical hit chance": "Critical Hit Chance",
     "critical hit damage": "Critical Hit Damage",
     "headshot damage": "Headshot Damage",
+    "armor on kill": "Armor on Kill",
     "protection from elites": "Protection from Elites",
     "burn resistance": "Burn Resistance",
     "bleed resistance": "Bleed Resistance",
@@ -85,6 +87,7 @@ GEAR_MOD_IDS = {
     "Critical Hit Chance": "critical-hit-chance-gear-mod",
     "Critical Hit Damage": "critical-hit-damage-gear-mod",
     "Headshot Damage": "headshot-damage-gear-mod",
+    "Armor on Kill": "armor-on-kill-gear-mod",
     "Protection from Elites": "protection-from-elites-gear-mod",
     "Burn Resistance": "burn-resistance-gear-mod",
     "Bleed Resistance": "bleed-resistance-gear-mod",
@@ -232,8 +235,14 @@ def is_gear_mod_context(text: str, mod_name: Optional[str] = None) -> bool:
     return any(marker in lower for marker in GEAR_MOD_MARKERS)
 
 
-def extract_percent(text: str, mod_name: str) -> Optional[float]:
+def extract_mod_value(text: str, mod_name: str) -> Optional[float]:
     max_value = MOD_MAX[mod_name]
+
+    if mod_name == "Armor on Kill":
+        values = [float(x) for x in NUMBER_RE.findall(text.replace(",", ""))]
+        valid = [v for v in values if 0 < v <= max_value * 1.15]
+        return max(valid) if valid else None
+
     values = [float(x) for x in PERCENT_RE.findall(text)]
     valid = [v for v in values if 0 < v <= max_value * 1.15]
     return max(valid) if valid else None
@@ -263,7 +272,7 @@ def collect_from_json(payloads: List[Tuple[str, Any]], ratio: float, thresholds:
             # compatibility, the canonical gear-mod ID, or a clear gear-mod label.
             if not is_gear_mod_context(blob, mod_name):
                 continue
-            value = extract_percent(blob, mod_name)
+            value = extract_mod_value(blob, mod_name)
             if value is None:
                 continue
             minimum = float(thresholds.get(mod_name, MOD_MAX[mod_name] * ratio))
@@ -290,42 +299,62 @@ def collect_from_json(payloads: List[Tuple[str, Any]], ratio: float, thresholds:
 
 
 def collect_from_text(text: str, ratio: float, thresholds: Dict[str, float]) -> List[Dict[str, Any]]:
-    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    lines = [re.sub(r"\\s+", " ", line).strip() for line in text.splitlines()]
     lines = [x for x in lines if x]
     found: List[Dict[str, Any]] = []
 
+    vendor_names = {
+        "White House",
+        "Clan",
+        "Countdown",
+        "The Campus",
+        "The Theater",
+        "Castle",
+        "Cassie",
+        "DZ East",
+        "DZ South",
+        "DZ West",
+        "Haven",
+        "Benitez",
+        "Danny",
+    }
+
+    current_vendor = "Vendor"
+
     for i, line in enumerate(lines):
-        mod_name = canonical_mod_name(line)
+        if line in vendor_names:
+            current_vendor = line
+            continue
+
+        # On the rendered vendor page, armor Gear Mods are labeled exactly
+        # "MOD". Skill attachments are labeled "Drone MOD", "Turret MOD", etc.
+        if line != "MOD":
+            continue
+
+        if i + 1 >= len(lines):
+            continue
+
+        stat_line = lines[i + 1]
+        mod_name = canonical_mod_name(stat_line)
         if not mod_name:
             continue
 
-        # Include the nearby card/type label. The stat is accepted only when
-        # the same card is clearly identified as a Gear Mod.
-        window = " | ".join(lines[max(0, i - 8): min(len(lines), i + 6)])
-        if not is_gear_mod_context(window, mod_name):
-            continue
-
-        value = extract_percent(window, mod_name)
+        value = extract_mod_value(stat_line, mod_name)
         if value is None:
             continue
+
         minimum = float(thresholds.get(mod_name, MOD_MAX[mod_name] * ratio))
         if value + 1e-9 < minimum:
             continue
-
-        # Usually the vendor/card heading is immediately above the item.
-        vendor = "Vendor"
-        for candidate in reversed(lines[max(0, i - 8):i]):
-            if len(candidate) <= 80 and not PERCENT_RE.search(candidate) and canonical_mod_name(candidate) is None:
-                vendor = candidate
-                break
 
         found.append({
             "name": mod_name,
             "value": value,
             "max": MOD_MAX[mod_name],
-            "vendor": vendor,
+            "vendor": current_vendor,
             "source": VENDOR_URL,
         })
+
     return found
 
 
@@ -368,7 +397,10 @@ def dedupe_mods(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
-def format_value(value: float) -> str:
+def format_value(value: float, mod_name: str) -> str:
+    if mod_name == "Armor on Kill":
+        return f"{int(round(value)):,}"
+
     if abs(value - round(value)) < 1e-9:
         return f"{int(round(value))}%"
     return f"{value:.1f}%"
@@ -418,7 +450,7 @@ def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict
         for mod in mods[:25]:
             pct = mod["value"] / mod["max"] * 100
             lines.append(
-                f"**{mod['name']} — {format_value(mod['value'])}** "
+                f"**{mod['name']} — {format_value(mod['value'], mod['name'])}** "
                 f"({pct:.0f}% of max)\n{mod['vendor']}"
             )
         value = "\n\n".join(lines)
@@ -465,8 +497,10 @@ def main() -> int:
     event = select_event_snapshot(fetch_event())
     vendor_text, vendor_json = fetch_vendor_rendered()
 
-    mods = collect_from_json(vendor_json, ratio, thresholds)
-    mods.extend(collect_from_text(vendor_text, ratio, thresholds))
+    # Use the rendered page as the source of current vendor inventory.
+    # Exact "MOD" rows are armor/gear mods; skill attachments use labels such
+    # as "Drone MOD" and are therefore excluded automatically.
+    mods = collect_from_text(vendor_text, ratio, thresholds)
     mods = dedupe_mods(mods)
 
     if args.debug:
