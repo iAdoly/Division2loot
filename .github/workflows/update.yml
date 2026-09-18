@@ -1,6 +1,8 @@
 name: Division 2 Discord Updater
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       force:
@@ -58,8 +60,8 @@ jobs:
           git commit -m "Update Division 2 bot state"
           git push
 
-      - name: Upload debug snapshot on failure
-        if: failure()
+      - name: Upload debug snapshot
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: vendor-debug
