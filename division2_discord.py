@@ -466,31 +466,39 @@ def loot_icon(label: str, config: Dict[str, Any]) -> str:
 
 
 def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-    lines = []
+    loot_lines = []
     for row in event["missions"]:
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
-        lines.append(f"**{row['mission']}**\n{prefix}{bilingual_loot(row['loot'])}")
+        loot_lines.append(
+            f"• **{row['mission']}:** {prefix}{bilingual_loot(row['loot'])}"
+        )
 
     vendor_lines = [
-        f"صندوق دروع تجريبي | Prototype Gear Cache — **{bilingual_loot(event['prototype_gear_cache'])}**",
-        f"صندوق أسلحة تجريبي | Prototype Weapon Cache — **{bilingual_loot(event['prototype_weapon_cache'])}**",
+        f"**Week | الأسبوع:** {event['week']}",
+        "",
+        f"• **Prototype Gear Cache | صندوق دروع تجريبي:** {bilingual_loot(event['prototype_gear_cache'])}",
+        f"• **Prototype Weapon Cache | صندوق أسلحة تجريبي:** {bilingual_loot(event['prototype_weapon_cache'])}",
     ]
 
+    description = "\n".join([
+        f"**Target Loot Date | تاريخ الغنائم:** {event['day']}",
+        "",
+        "**Target Loot | الغنائم المستهدفة**",
+        *loot_lines,
+        "",
+        "**Vendor | البائع**",
+        *vendor_lines,
+    ])
+
     return {
-        "title": "غنائم التصعيد | Escalation Target Loot",
+        "title": "Escalation Target Loot | غنائم التصعيد",
         "url": EVENT_URL,
-        "description": f"**الأسبوع | Week:** {event['week']}\n**تاريخ الغنائم | Target Loot Date:** {event['day']}",
+        "description": description[:4096],
         "color": int(config.get("embed_color", 15105570)),
-        "fields": [
-            {"name": "التصعيدات | Escalations", "value": "\n\n".join(lines)[:1024] or "No data", "inline": False},
-            {"name": "بائع متطلبات التصعيد | Escalation Requisition Vendor", "value": "\n".join(vendor_lines)[:1024], "inline": False},
-        ],
         "footer": {"text": "Source: hi-dep Division 2"},
         "timestamp": utc_now().isoformat(),
     }
-
-
 def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
     if mods:
         lines = []
