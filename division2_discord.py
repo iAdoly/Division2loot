@@ -635,6 +635,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="Post event and vendor even if content is unchanged")
     parser.add_argument("--force-event", action="store_true", help="Post the Escalation event even if content is unchanged")
+    parser.add_argument("--force-vendor", action="store_true", help="Post vendor mods even if content is unchanged")
+    parser.add_argument("--event-only", action="store_true", help="Only process/post Escalation")
+    parser.add_argument("--vendor-only", action="store_true", help="Only process/post Vendor")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -645,32 +648,50 @@ def main() -> int:
     if not isinstance(thresholds, dict):
         thresholds = {}
 
-    event = select_event_snapshot(fetch_event())
-    vendor_text, vendor_json = fetch_vendor_rendered()
+    if args.event_only and args.vendor_only:
+        raise RuntimeError("--event-only and --vendor-only cannot be used together.")
 
-    # Use the rendered page as the source of current vendor inventory.
-    # Exact "MOD" rows are armor/gear mods; skill attachments use labels such
-    # as "Drone MOD" and are therefore excluded automatically.
-    mods = collect_from_text(vendor_text, ratio, thresholds)
-    mods = dedupe_mods(mods)
+    want_event = not args.vendor_only
+    want_vendor = not args.event_only
 
-    if args.debug:
-        (ROOT / "debug_vendor.txt").write_text(vendor_text, encoding="utf-8")
-        (ROOT / "debug_vendor_json.json").write_text(
-            json.dumps([{"url": u, "data": d} for u, d in vendor_json], ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"Captured {len(vendor_json)} JSON responses; high mods: {len(mods)}")
+    event: Optional[Dict[str, Any]] = None
+    mods: List[Dict[str, Any]] = []
+    vendor_text = ""
+    vendor_json: List[Tuple[str, Any]] = []
 
-    event_hash = stable_hash(event)
-    mods_hash = stable_hash(mods)
-    changed_event = event_hash != state.get("event_hash")
-    changed_mods = mods_hash != state.get("mods_hash")
+    event_hash = str(state.get("event_hash", ""))
+    mods_hash = str(state.get("mods_hash", ""))
+    changed_event = False
+    changed_mods = False
+
+    if want_event:
+        event = select_event_snapshot(fetch_event())
+        event_hash = stable_hash(event)
+        changed_event = event_hash != state.get("event_hash")
+
+    if want_vendor:
+        vendor_text, vendor_json = fetch_vendor_rendered()
+
+        # Use the rendered page as the source of current vendor inventory.
+        # Exact "MOD" rows are armor/gear mods; skill attachments use labels such
+        # as "Drone MOD" and are therefore excluded automatically.
+        mods = collect_from_text(vendor_text, ratio, thresholds)
+        mods = dedupe_mods(mods)
+        mods_hash = stable_hash(mods)
+        changed_mods = mods_hash != state.get("mods_hash")
+
+        if args.debug:
+            (ROOT / "debug_vendor.txt").write_text(vendor_text, encoding="utf-8")
+            (ROOT / "debug_vendor_json.json").write_text(
+                json.dumps([{"url": u, "data": d} for u, d in vendor_json], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"Captured {len(vendor_json)} JSON responses; high mods: {len(mods)}")
 
     embeds: List[Dict[str, Any]] = []
-    if args.force or args.force_event or changed_event:
+    if want_event and event is not None and (args.force or args.force_event or changed_event):
         embeds.append(build_event_embed(event, config))
-    if args.force or changed_mods:
+    if want_vendor and (args.force or args.force_vendor or changed_mods):
         embeds.append(build_mods_embed(mods, config))
 
     if not embeds:
@@ -679,8 +700,10 @@ def main() -> int:
 
     send_webhook(embeds, config)
 
-    state["event_hash"] = event_hash
-    state["mods_hash"] = mods_hash
+    if want_event:
+        state["event_hash"] = event_hash
+    if want_vendor:
+        state["mods_hash"] = mods_hash
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"Posted {len(embeds)} embed(s). High vendor mods found: {len(mods)}")
