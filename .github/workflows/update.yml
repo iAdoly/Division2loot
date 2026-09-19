@@ -9,8 +9,9 @@ on:
         default: false
         type: boolean
   schedule:
-    # 11:01 Saudi time = 08:01 UTC.
-    - cron: "1 8 * * *"
+    # Run daily at 11:01 AM Saudi Arabia time.
+    - cron: "1 11 * * *"
+      timezone: "Asia/Riyadh"
 
 permissions:
   contents: write
@@ -29,28 +30,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+      - name: Install lightweight dependencies
+        run: python -m pip install requests
 
       - name: Post daily Escalation
         if: github.event_name == 'schedule'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python division2_discord.py --event-only --force-event --debug
-
-      - name: Post weekly Vendor
-        if: github.event_name == 'schedule'
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          if [ "$(date -u +%u)" = "2" ]; then
-            python division2_discord.py --vendor-only --force-vendor --debug
-          else
-            echo "Not Tuesday; skipping Vendor."
-          fi
 
       - name: Manual run
         if: github.event_name == 'workflow_dispatch'
@@ -77,12 +64,3 @@ jobs:
           git commit -m "Update Division 2 bot state"
           git push
 
-      - name: Upload debug snapshot
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: vendor-debug
-          path: |
-            debug_vendor.txt
-            debug_vendor_json.json
-          if-no-files-found: ignore
