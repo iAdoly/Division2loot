@@ -468,28 +468,24 @@ def loot_icon(label: str, config: Dict[str, Any]) -> str:
     return str(custom.get(canonical) or custom.get(label) or "")
 
 
-def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-    blocks = []
+def build_event_text(event: Dict[str, Any], config: Dict[str, Any]) -> str:
+    lines = [
+        "**Escalation Target Loot | غنائم التصعيد**",
+        f"**Target Loot Date | تاريخ الغنائم:** {event['day']}",
+        "",
+    ]
+
     for row in event["missions"]:
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
-        blocks.append(
-            f"### {row['mission']} — {prefix}{bilingual_loot(row['loot'])}"
+        lines.append(
+            f"**{row['mission']}** — {prefix}{bilingual_loot(row['loot'])}"
         )
+        lines.append("")
 
-    description = "\n\n".join([
-        f"**Target Loot Date | تاريخ الغنائم:** {event['day']}",
-        *blocks,
-    ])
+    lines.append("-# Source: hi-dep Division 2")
+    return "\n".join(lines).strip()[:2000]
 
-    return {
-        "title": "Escalation Target Loot | غنائم التصعيد",
-        "url": EVENT_URL,
-        "description": description[:4096],
-        "color": int(config.get("embed_color", 15105570)),
-        "footer": {"text": "Source: hi-dep Division 2"},
-        "timestamp": utc_now().isoformat(),
-    }
 def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict[str, Any]:
     if mods:
         lines = []
@@ -512,19 +508,29 @@ def build_mods_embed(mods: List[Dict[str, Any]], config: Dict[str, Any]) -> Dict
     }
 
 
-def send_webhook(embeds: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
+def send_webhook(
+    embeds: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    content: str = "",
+) -> None:
     url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
     if not url:
         raise RuntimeError("DISCORD_WEBHOOK_URL secret is not configured.")
 
-    payload = {
+    payload: Dict[str, Any] = {
         "username": str(config.get("discord_username", "Division 2 Loot")),
-        "embeds": embeds,
     }
+    if content:
+        payload["content"] = content[:2000]
+    if embeds:
+        payload["embeds"] = embeds
+
+    if not content and not embeds:
+        raise RuntimeError("Nothing to send to Discord.")
+
     r = requests.post(url, json=payload, timeout=HTTP_TIMEOUT)
     if r.status_code >= 400:
         raise RuntimeError(f"Discord webhook failed: HTTP {r.status_code}: {r.text[:500]}")
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -588,17 +594,18 @@ def main() -> int:
             )
             print(f"Captured {len(vendor_json)} JSON responses; high mods: {len(mods)}")
 
+    event_text = ""
     embeds: List[Dict[str, Any]] = []
     if want_event and event is not None and (args.force or args.force_event or changed_event):
-        embeds.append(build_event_embed(event, config))
+        event_text = build_event_text(event, config)
     if want_vendor and (args.force or args.force_vendor or changed_mods):
         embeds.append(build_mods_embed(mods, config))
 
-    if not embeds:
+    if not event_text and not embeds:
         print("No changes; nothing to post.")
         return 0
 
-    send_webhook(embeds, config)
+    send_webhook(embeds, config, content=event_text)
 
     if want_event:
         state["event_hash"] = event_hash
@@ -607,9 +614,9 @@ def main() -> int:
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if want_vendor:
-        print(f"Posted {len(embeds)} embed(s). High vendor mods found: {len(mods)}")
+        print(f"Posted Discord update. Vendor embeds: {len(embeds)}; high vendor mods: {len(mods)}")
     else:
-        print(f"Posted {len(embeds)} Escalation embed(s).")
+        print("Posted Escalation as a plain Discord message.")
     return 0
 
 
