@@ -39,5 +39,6 @@
     "China Light Industries": "<:china_light:1550661406918189096>"
   },
   "discord_username": "Division 2 Loot",
-  "embed_color": 15105570
+  "embed_color": 15105570,
+  "vendor_enabled": false
 }
