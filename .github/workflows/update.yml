@@ -11,10 +11,10 @@ on:
         default: false
         type: boolean
   schedule:
-    # Hourly vendor check
-    - cron: "17 * * * *"
     # Daily Escalation post at 11:01 Saudi time (08:01 UTC)
     - cron: "1 8 * * *"
+    # Weekly Vendor post every Tuesday at 11:01 Saudi time (08:01 UTC)
+    - cron: "1 8 * * 2"
 
 permissions:
   contents: write
@@ -45,8 +45,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
             python division2_discord.py --force --debug
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "1 8 * * 2" ]; then
+            python division2_discord.py --vendor-only --force-vendor --debug
           elif [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "1 8 * * *" ]; then
-            python division2_discord.py --force-event --debug
+            python division2_discord.py --event-only --force-event --debug
           else
             python division2_discord.py --debug
           fi
