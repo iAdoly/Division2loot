@@ -1,8 +1,6 @@
 name: Division 2 Discord Updater
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       force:
@@ -11,10 +9,8 @@ on:
         default: false
         type: boolean
   schedule:
-    # Daily Escalation post at 11:01 Saudi time (08:01 UTC)
+    # 11:01 Saudi time = 08:01 UTC.
     - cron: "1 8 * * *"
-    # Weekly Vendor post every Tuesday at 11:01 Saudi time (08:01 UTC)
-    - cron: "1 8 * * 2"
 
 permissions:
   contents: write
@@ -39,16 +35,30 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Run updater
+      - name: Post daily Escalation
+        if: github.event_name == 'schedule'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python division2_discord.py --event-only --force-event --debug
+
+      - name: Post weekly Vendor
+        if: github.event_name == 'schedule'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
-            python division2_discord.py --force --debug
-          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "1 8 * * 2" ]; then
+          if [ "$(date -u +%u)" = "2" ]; then
             python division2_discord.py --vendor-only --force-vendor --debug
-          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "1 8 * * *" ]; then
-            python division2_discord.py --event-only --force-event --debug
+          else
+            echo "Not Tuesday; skipping Vendor."
+          fi
+
+      - name: Manual run
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            python division2_discord.py --force --debug
           else
             python division2_discord.py --debug
           fi
