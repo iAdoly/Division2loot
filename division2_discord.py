@@ -633,7 +633,8 @@ def send_webhook(embeds: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--force", action="store_true", help="Post even if content is unchanged")
+    parser.add_argument("--force", action="store_true", help="Post event and vendor even if content is unchanged")
+    parser.add_argument("--force-event", action="store_true", help="Post the Escalation event even if content is unchanged")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -667,7 +668,7 @@ def main() -> int:
     changed_mods = mods_hash != state.get("mods_hash")
 
     embeds: List[Dict[str, Any]] = []
-    if args.force or changed_event:
+    if args.force or args.force_event or changed_event:
         embeds.append(build_event_embed(event, config))
     if args.force or changed_mods:
         embeds.append(build_mods_embed(mods, config))
