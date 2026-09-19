@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -215,26 +215,6 @@ ALIASES = {
     "repair skills": "Repair Skills",
 }
 
-GEAR_MOD_IDS = {
-    "Critical Hit Chance": "critical-hit-chance-gear-mod",
-    "Critical Hit Damage": "critical-hit-damage-gear-mod",
-    "Headshot Damage": "headshot-damage-gear-mod",
-    "Armor on Kill": "armor-on-kill-gear-mod",
-    "Protection from Elites": "protection-from-elites-gear-mod",
-    "Burn Resistance": "burn-resistance-gear-mod",
-    "Bleed Resistance": "bleed-resistance-gear-mod",
-    "Shock Resistance": "shock-resistance-gear-mod",
-    "Disrupt Resistance": "disrupt-resistance-gear-mod",
-    "Blind/Deaf Resistance": "blind-deaf-resistance-gear-mod",
-    "Disorient Resistance": "disorient-resistance-gear-mod",
-    "Ensnare Resistance": "ensnare-resistance-gear-mod",
-    "Pulse Resistance": "pulse-resistance-gear-mod",
-    "Incoming Repairs": "incoming-repairs-gear-mod",
-    "Skill Haste": "skill-haste-gear-mod",
-    "Skill Duration": "skill-duration-gear-mod",
-    "Repair Skills": "repair-skills-gear-mod",
-}
-
 PERCENT_RE = re.compile(r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*%")
 NUMBER_RE = re.compile(r"(?<!\d)(\d{1,5}(?:\.\d+)?)(?!\d)")
 
@@ -348,44 +328,12 @@ def select_event_snapshot(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def walk_json(value: Any, path: Tuple[str, ...] = ()) -> Iterable[Tuple[Tuple[str, ...], Any]]:
-    yield path, value
-    if isinstance(value, dict):
-        for k, v in value.items():
-            yield from walk_json(v, path + (str(k),))
-    elif isinstance(value, list):
-        for i, v in enumerate(value):
-            yield from walk_json(v, path + (str(i),))
-
-
 def canonical_mod_name(text: str) -> Optional[str]:
     lower = text.lower()
     for alias, canonical in ALIASES.items():
         if alias in lower:
             return canonical
     return None
-
-
-def is_gear_mod_context(text: str, mod_name: Optional[str] = None) -> bool:
-    lower = text.lower()
-
-    # Never accept skill attachment mods (drone/turret/hive/etc.).
-    if any(marker in lower for marker in SKILL_MOD_MARKERS):
-        return False
-
-    # Best signal: the structured data says compatibility is gear-mod.
-    if '"compatibility": "gear-mod"' in lower or '"compatibility":"gear-mod"' in lower:
-        return True
-
-    # Also accept the canonical gear-mod ID for the stat, e.g.
-    # skill-haste-gear-mod. This is what prevents Skill Haste from being missed.
-    if mod_name:
-        mod_id = GEAR_MOD_IDS.get(mod_name, "")
-        if mod_id and mod_id in lower:
-            return True
-
-    # Fallback for rendered text/card labels.
-    return any(marker in lower for marker in GEAR_MOD_MARKERS)
 
 
 def extract_mod_value(text: str, mod_name: str) -> Optional[float]:
@@ -399,56 +347,6 @@ def extract_mod_value(text: str, mod_name: str) -> Optional[float]:
     values = [float(x) for x in PERCENT_RE.findall(text)]
     valid = [v for v in values if 0 < v <= max_value * 1.15]
     return max(valid) if valid else None
-
-
-def vendor_hint_from_path(path: Tuple[str, ...]) -> str:
-    words = [p for p in path if not p.isdigit()]
-    if not words:
-        return "Vendor"
-    return " › ".join(words[-3:])
-
-
-def collect_from_json(payloads: List[Tuple[str, Any]], ratio: float, thresholds: Dict[str, float]) -> List[Dict[str, Any]]:
-    found: List[Dict[str, Any]] = []
-    for source_url, payload in payloads:
-        for path, node in walk_json(payload):
-            if not isinstance(node, dict):
-                continue
-            blob = json.dumps(node, ensure_ascii=False)
-
-            mod_name = canonical_mod_name(blob)
-            if not mod_name:
-                continue
-
-            # A stat name by itself is not enough: CHD/CHC/Skill Haste etc.
-            # can also appear as normal attributes. Require structured gear-mod
-            # compatibility, the canonical gear-mod ID, or a clear gear-mod label.
-            if not is_gear_mod_context(blob, mod_name):
-                continue
-            value = extract_mod_value(blob, mod_name)
-            if value is None:
-                continue
-            minimum = float(thresholds.get(mod_name, MOD_MAX[mod_name] * ratio))
-            if value + 1e-9 < minimum:
-                continue
-
-            vendor = "Vendor"
-            for key in ("vendor", "vendor_name", "location", "source", "name"):
-                val = node.get(key)
-                if isinstance(val, str) and val.strip() and canonical_mod_name(val) is None:
-                    vendor = val.strip()
-                    break
-            if vendor == "Vendor":
-                vendor = vendor_hint_from_path(path)
-
-            found.append({
-                "name": mod_name,
-                "value": value,
-                "max": MOD_MAX[mod_name],
-                "vendor": vendor,
-                "source": source_url,
-            })
-    return found
 
 
 def collect_from_text(text: str, ratio: float, thresholds: Dict[str, float]) -> List[Dict[str, Any]]:
