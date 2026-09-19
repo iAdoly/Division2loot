@@ -12,8 +12,8 @@ on:
     # Daily at 11:01 AM Saudi Arabia time (08:01 UTC).
     - cron: "1 8 * * *"
 
-    # Temporary test: 2026-09-19 at 14:51 Saudi time (11:51 UTC).
-    - cron: "51 11 19 9 *"
+    # Temporary test: 2026-09-19 at 15:02 Saudi time (12:02 UTC).
+    - cron: "2 12 19 9 *"
 
 permissions:
   contents: write
