@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
@@ -410,6 +409,10 @@ def collect_from_text(text: str, ratio: float, thresholds: Dict[str, float]) -> 
 
 
 def fetch_vendor_rendered() -> Tuple[str, List[Tuple[str, Any]]]:
+    # Playwright is loaded only when Vendor is enabled, keeping daily
+    # Escalation runs lightweight.
+    from playwright.sync_api import sync_playwright
+
     json_payloads: List[Tuple[str, Any]] = []
 
     with sync_playwright() as p:
