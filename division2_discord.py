@@ -471,8 +471,7 @@ def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
         blocks.append(
-            f"### {row['mission']}\n"
-            f"{prefix}**{bilingual_loot(row['loot'])}**"
+            f"### {row['mission']} — {prefix}{bilingual_loot(row['loot'])}"
         )
 
     description = "\n\n".join([
