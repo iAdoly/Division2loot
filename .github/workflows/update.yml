@@ -8,12 +8,8 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    # Daily at 11:01 AM Saudi Arabia time (08:01 UTC).
-    - cron: "1 8 * * *"
-
-    # Temporary test: 2026-09-19 at 15:02 Saudi time (12:02 UTC).
-    - cron: "2 12 19 9 *"
+  repository_dispatch:
+    types: [cron_job_org]
 
 permissions:
   contents: write
@@ -36,7 +32,7 @@ jobs:
         run: python -m pip install requests
 
       - name: Post daily Escalation
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'repository_dispatch'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python division2_discord.py --event-only --force-event --debug
