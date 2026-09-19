@@ -9,9 +9,11 @@ on:
         default: false
         type: boolean
   schedule:
-    # Run daily at 11:01 AM Saudi Arabia time.
-    - cron: "1 11 * * *"
-      timezone: "Asia/Riyadh"
+    # Daily at 11:01 AM Saudi Arabia time (08:01 UTC).
+    - cron: "1 8 * * *"
+
+    # Temporary test: 2026-09-19 at 14:51 Saudi time (11:51 UTC).
+    - cron: "51 11 19 9 *"
 
 permissions:
   contents: write
