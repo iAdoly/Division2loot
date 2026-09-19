@@ -8,6 +8,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
@@ -23,6 +24,7 @@ VENDOR_URL = "https://hi-dep.github.io/division2/?view=vendor&lang=en"
 
 TIMEOUT_MS = 45_000
 HTTP_TIMEOUT = 30
+SAUDI_TZ = ZoneInfo("Asia/Riyadh")
 
 TOKEN_LABELS = {
     "ar": "Assault Rifle",
@@ -262,6 +264,10 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def saudi_now() -> datetime:
+    return datetime.now(SAUDI_TZ)
+
+
 def load_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not path.exists():
         return dict(default)
@@ -306,7 +312,7 @@ def select_event_snapshot(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(escalation, list):
         raise RuntimeError("Escalation data is missing.")
 
-    today = utc_now().strftime("%Y-%m-%d")
+    today = saudi_now().strftime("%Y-%m-%d")
     candidates: List[Tuple[str, Dict[str, Any], Dict[str, Any]]] = []
 
     for entry in escalation:
@@ -556,17 +562,9 @@ def format_value(value: float, mod_name: str) -> str:
 def loot_icon(label: str, config: Dict[str, Any]) -> str:
     canonical = LOOT_NAME_ALIASES.get(label, label)
     custom = config.get("loot_emojis", {})
-    if isinstance(custom, dict):
-        if canonical in custom:
-            return str(custom[canonical])
-        if label in custom:
-            return str(custom[label])
-    low = canonical.lower()
-    if any(x in low for x in ("rifle", "smg", "shotgun", "pistol", "lmg")):
+    if not isinstance(custom, dict):
         return ""
-    if any(x in low for x in ("armor", "mask", "gloves", "holster", "kneepads", "backpack")):
-        return ""
-    return ""
+    return str(custom.get(canonical) or custom.get(label) or "")
 
 
 def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
@@ -706,7 +704,10 @@ def main() -> int:
         state["mods_hash"] = mods_hash
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    print(f"Posted {len(embeds)} embed(s). High vendor mods found: {len(mods)}")
+    if want_vendor:
+        print(f"Posted {len(embeds)} embed(s). High vendor mods found: {len(mods)}")
+    else:
+        print(f"Posted {len(embeds)} Escalation embed(s).")
     return 0
 
 
