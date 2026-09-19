@@ -466,29 +466,18 @@ def loot_icon(label: str, config: Dict[str, Any]) -> str:
 
 
 def build_event_embed(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-    loot_lines = []
+    blocks = []
     for row in event["missions"]:
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
-        loot_lines.append(
-            f"• **{row['mission']}:** {prefix}{bilingual_loot(row['loot'])}"
+        blocks.append(
+            f"### {row['mission']}\n"
+            f"{prefix}**{bilingual_loot(row['loot'])}**"
         )
 
-    vendor_lines = [
-        f"**Week | الأسبوع:** {event['week']}",
-        "",
-        f"• **Prototype Gear Cache | صندوق دروع تجريبي:** {bilingual_loot(event['prototype_gear_cache'])}",
-        f"• **Prototype Weapon Cache | صندوق أسلحة تجريبي:** {bilingual_loot(event['prototype_weapon_cache'])}",
-    ]
-
-    description = "\n".join([
+    description = "\n\n".join([
         f"**Target Loot Date | تاريخ الغنائم:** {event['day']}",
-        "",
-        "**Target Loot | الغنائم المستهدفة**",
-        *loot_lines,
-        "",
-        "**Vendor | البائع**",
-        *vendor_lines,
+        *blocks,
     ])
 
     return {
@@ -555,8 +544,13 @@ def main() -> int:
     if args.event_only and args.vendor_only:
         raise RuntimeError("--event-only and --vendor-only cannot be used together.")
 
+    vendor_enabled = bool(config.get("vendor_enabled", False))
     want_event = not args.vendor_only
-    want_vendor = not args.event_only
+    want_vendor = vendor_enabled and not args.event_only
+
+    if args.vendor_only and not vendor_enabled:
+        print("Vendor is disabled in config; nothing to post.")
+        return 0
 
     event: Optional[Dict[str, Any]] = None
     mods: List[Dict[str, Any]] = []
