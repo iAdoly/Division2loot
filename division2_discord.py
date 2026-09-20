@@ -223,7 +223,7 @@ def build_message(event: dict[str, Any], config: dict[str, Any]) -> str:
         icon = loot_icon(row["loot"], config)
         prefix = f"{icon} " if icon else ""
         lines.append(
-            f"-# **{row['mission']}** — {prefix}{bilingual_loot(row['loot'])}"
+            f"**{row['mission']}** — {prefix}{bilingual_loot(row['loot'])}"
         )
         lines.append("")
 
