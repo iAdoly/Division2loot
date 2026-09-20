@@ -1,78 +1,70 @@
 # Division2loot
 
-Discord updater for **The Division 2** using the public data/pages at [hi-dep.github.io/division2](https://hi-dep.github.io/division2/).
+Simple Discord updater for **The Division 2 Escalation Target Loot**.
 
-## What it posts
+It reads the current Escalation data from the public **hi-dep Division 2** dataset and posts a clean bilingual Arabic/English message to Discord.
 
-- **Escalation** target loot from the Event data.
-- **High Vendor Mods only** from the Vendor page.
-- Vendor mods are considered high when they meet the configured roll threshold (default: **90% of max roll**).
-- It stores a small state file so manual/non-forced runs do not repost unchanged data.
-- Arabic + English loot names and configured Discord custom emojis are supported for Brand Sets / Gear Sets.
+## Features
 
-## Discord setup
+- Daily Escalation Target Loot
+- Arabic + English loot names
+- Discord custom emojis for supported Brand Sets / Gear Sets
+- Small Discord text for mission rows
+- Saudi Arabia date handling (`Asia/Riyadh`)
+- Automatic trigger through **cron-job.org**
+- Manual runs through GitHub Actions
 
-1. In Discord open **Server Settings → Integrations → Webhooks**.
-2. Create a webhook for the channel you want.
-3. In this GitHub repository open **Settings → Secrets and variables → Actions**.
-4. Create a repository secret named exactly:
-   `DISCORD_WEBHOOK_URL`
-5. Paste the webhook URL as the secret value.
+## Automation
 
-> Never put the webhook URL directly in this repository.
+The production schedule is handled by **cron-job.org**:
 
-## Run it
+- **Every day:** 11:01 AM
+- **Timezone:** `Asia/Riyadh`
+- Trigger: GitHub `repository_dispatch`
+- Event type: `cron_job_org`
 
-Open **Actions → Division 2 Discord Updater → Run workflow**.
+GitHub's native scheduled workflow is intentionally not used.
 
-For a test, enable **Force post** so it sends even if the current data was already posted.
+## Discord secret
 
-Automatic schedule (Saudi Arabia time):
+The repository needs one GitHub Actions secret:
 
-- **Escalation:** every day at **11:01 AM**.
-- **Vendor:** every **Tuesday at 11:01 AM**.
-- Tuesday uses the same workflow run, so Escalation and Vendor do not race each other when updating `state.json`.
+`DISCORD_WEBHOOK_URL`
 
-Scheduled posts are forced for their intended cadence. Manual runs can still use **Force post** when needed.
+Keep the webhook URL only in GitHub Actions Secrets. Do not put it in the repository files.
 
-## High-mod threshold
+## Manual run
 
-Edit `config.json`:
+Open:
 
-```json
-{
-  "high_mod_ratio": 0.9
-}
-```
+**Actions → Division 2 Discord Updater → Run workflow**
 
-Examples at 90%:
+The workflow fetches the current Escalation Target Loot and posts it directly to Discord.
 
-- Critical Hit Chance: 5.4% / 6%
-- Critical Hit Damage: 10.8% / 12%
-- Protection from Elites: 11.7% / 13%
-- Skill Haste: 10.8% / 12%
+## Custom emojis
 
-## Brand / loot icons
+Custom Discord emoji mappings are stored in `config.json`.
 
-Discord cannot place arbitrary tiny PNGs inline beside every line of an embed. The bot therefore supports **custom Discord emoji mappings** in `config.json`.
-
-After you upload your preferred brand/gear icons as server emojis, add their Discord emoji strings under `loot_emojis`, for example:
+Example:
 
 ```json
 {
   "loot_emojis": {
-    "Grupo Sombra S.A.": "<:grupo:123456789012345678>",
-    "Electrique": "<:electrique:123456789012345678>"
+    "China Light Industries": "<:china_light:123456789012345678>"
   }
 }
 ```
 
-If a loot item has no configured custom emoji, the bot simply shows the bilingual text without an icon.
+If an item has no configured emoji, the bilingual loot name is still posted normally.
 
-## Sources
+## Files
 
-- Event: https://hi-dep.github.io/division2/?view=event&lang=en
+- `division2_discord.py` — bot logic
+- `config.json` — Discord username and custom emoji mappings
+- `requirements.txt` — Python dependency
+- `.github/workflows/update.yml` — GitHub Actions trigger
+
+## Data source
+
+- Event page: https://hi-dep.github.io/division2/?view=event&lang=en
 - Event JSON: https://hi-dep.github.io/division2/data/event/index.json
-- Vendor: https://hi-dep.github.io/division2/?view=vendor&lang=en
-
-The Vendor scraper opens the rendered page in Chromium and reads the visible Vendor rows. JSON responses are captured only for debugging. This avoids relying on a guessed private/internal vendor-data URL.
