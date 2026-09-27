@@ -203,15 +203,15 @@ def select_event_snapshot(data: dict[str, Any]) -> dict[str, Any]:
 
     expected_day = target_loot_day()
     exact = [item for item in candidates if item[0] == expected_day]
-    if not exact:
-        available_days = sorted({item[0] for item in candidates})
-        latest_day = available_days[-1] if available_days else "none"
-        raise RuntimeError(
-            f"Target loot for {expected_day} is not available from the source yet "
-            f"(latest source day: {latest_day}). Refusing to send stale/wrong loot."
-        )
 
-    day, entry, row = exact[0]
+    if exact:
+        _, entry, row = exact[0]
+    else:
+        # If today's date is missing from the source, use the newest available
+        # target-loot row but display the expected in-game reset date.
+        _, entry, row = max(candidates, key=lambda item: item[0])
+
+    day = expected_day
 
     missions = [str(item).strip() for item in entry.get("missions", [])]
     loot = [normalize_label(item) for item in row.get("target_loot", [])]
