@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -131,8 +131,15 @@ def load_config() -> dict[str, Any]:
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def saudi_today() -> str:
-    return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d")
+def target_loot_day() -> str:
+    """
+    Escalation target loot resets at 11:00 AM Saudi time.
+    Before reset, the game is still on the previous target-loot day.
+    """
+    now = datetime.now(SAUDI_TZ)
+    if now.hour < 11:
+        now -= timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
 
 
 def normalize_label(value: Any) -> str:
@@ -152,10 +159,17 @@ def bilingual_loot(label: str) -> str:
 
 
 def fetch_event() -> dict[str, Any]:
+    # Avoid stale GitHub Pages/CDN responses when the daily loot rotates.
+    cache_buster = int(datetime.now(SAUDI_TZ).timestamp())
     response = requests.get(
         EVENT_JSON_URL,
+        params={"_": cache_buster},
         timeout=HTTP_TIMEOUT,
-        headers={"User-Agent": "Division2loot/1.0"},
+        headers={
+            "User-Agent": "Division2loot/1.0",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
     )
     response.raise_for_status()
     return response.json()
@@ -187,9 +201,17 @@ def select_event_snapshot(data: dict[str, Any]) -> dict[str, Any]:
     if not candidates:
         raise RuntimeError("No escalation target-loot rows found.")
 
-    today = saudi_today()
-    exact = [item for item in candidates if item[0] == today]
-    day, entry, row = exact[0] if exact else max(candidates, key=lambda item: item[0])
+    expected_day = target_loot_day()
+    exact = [item for item in candidates if item[0] == expected_day]
+    if not exact:
+        available_days = sorted({item[0] for item in candidates})
+        latest_day = available_days[-1] if available_days else "none"
+        raise RuntimeError(
+            f"Target loot for {expected_day} is not available from the source yet "
+            f"(latest source day: {latest_day}). Refusing to send stale/wrong loot."
+        )
+
+    day, entry, row = exact[0]
 
     missions = [str(item).strip() for item in entry.get("missions", [])]
     loot = [normalize_label(item) for item in row.get("target_loot", [])]
