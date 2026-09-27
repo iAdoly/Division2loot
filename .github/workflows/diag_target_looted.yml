@@ -9,42 +9,28 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect target_looted page and scripts
+      - name: Inspect latest target_looted gzip
         run: |
           python - <<'PY'
-          import re, requests, urllib.parse
+          import gzip, io, json, requests, time
 
-          page_url = "https://hi-dep.github.io/division2/?view=target_looted&lang=en"
-          headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache", "Pragma": "no-cache"}
+          url = "https://hi-dep.github.io/division2/data/target_looted/target_looted_latest.json.gz"
+          r = requests.get(
+              url,
+              params={"ts": int(time.time())},
+              headers={"User-Agent": "Mozilla/5.0", "Cache-Control":"no-cache", "Pragma":"no-cache"},
+              timeout=30,
+          )
+          r.raise_for_status()
+          raw = gzip.GzipFile(fileobj=io.BytesIO(r.content)).read()
+          data = json.loads(raw.decode("utf-8"))
 
-          html = requests.get(page_url, headers=headers, timeout=30).text
-          print("PAGE_LEN", len(html))
-          print("HAS_TARGET_LOOTED", "target_looted" in html)
+          print("TOP_KEYS", list(data.keys()))
+          print("META", json.dumps(data.get("meta", {}), ensure_ascii=False, indent=2))
 
-          scripts = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html, flags=re.I)
-          print("SCRIPTS", scripts)
+          events = data.get("events", {})
+          print("EVENT_KEYS", list(events.keys()) if isinstance(events, dict) else type(events).__name__)
 
-          base = "https://hi-dep.github.io/division2/"
-          for src in scripts:
-              url = urllib.parse.urljoin(base, src)
-              try:
-                  text = requests.get(url, headers=headers, timeout=30).text
-              except Exception as e:
-                  print("SCRIPT_ERROR", url, repr(e))
-                  continue
-
-              if "target_looted" in text or "target_loot" in text or "/data/" in text:
-                  print("\nSCRIPT_MATCH", url)
-                  for pat in (
-                      r'["\']([^"\']*target[^"\']*\.json[^"\']*)["\']',
-                      r'["\']([^"\']*/data/[^"\']+\.json[^"\']*)["\']',
-                      r'fetch\(([^\)]+)\)',
-                  ):
-                      for m in re.findall(pat, text, flags=re.I)[:100]:
-                          print("MATCH", m)
-
-                  for keyword in ("target_looted", "target_loot", "event/index.json"):
-                      pos = text.find(keyword)
-                      if pos >= 0:
-                          print("CONTEXT", keyword, text[max(0,pos-800):pos+1500])
+          esc = events.get("Escalation") if isinstance(events, dict) else None
+          print("ESCALATION", json.dumps(esc, ensure_ascii=False, indent=2)[:30000])
           PY
