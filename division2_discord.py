@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import os
 import sys
@@ -13,7 +15,7 @@ import requests
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
 
-EVENT_JSON_URL = "https://hi-dep.github.io/division2/data/event/index.json"
+TARGET_LOOT_URL = "https://hi-dep.github.io/division2/data/target_looted/target_looted_latest.json.gz"
 HTTP_TIMEOUT = 30
 SAUDI_TZ = ZoneInfo("Asia/Riyadh")
 
@@ -152,11 +154,11 @@ def bilingual_loot(label: str) -> str:
 
 
 def fetch_event() -> dict[str, Any]:
-    # Avoid stale GitHub Pages/CDN responses when the daily loot rotates.
+    # Use the same current Target Loot database as the site's target_looted view.
     cache_buster = int(datetime.now(SAUDI_TZ).timestamp())
     response = requests.get(
-        EVENT_JSON_URL,
-        params={"_": cache_buster},
+        TARGET_LOOT_URL,
+        params={"ts": cache_buster},
         timeout=HTTP_TIMEOUT,
         headers={
             "User-Agent": "Division2loot/1.0",
@@ -165,7 +167,17 @@ def fetch_event() -> dict[str, Any]:
         },
     )
     response.raise_for_status()
-    return response.json()
+
+    try:
+        raw = gzip.GzipFile(fileobj=io.BytesIO(response.content)).read()
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Invalid target_looted data from hi-dep.") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Target-looted payload is not an object.")
+
+    return data
 
 
 def _parse_day(value: Any) -> datetime | None:
@@ -196,129 +208,90 @@ def _entry_week_key(entry: dict[str, Any]) -> datetime | None:
 
 
 def select_event_snapshot(data: dict[str, Any]) -> dict[str, Any]:
-    escalation = data.get("Escalation")
-    if not isinstance(escalation, list):
-        raise RuntimeError("Escalation data is missing.")
+    meta = data.get("meta")
+    events = data.get("events")
 
-    expected_day = target_loot_day()
-    expected_dt = _parse_day(expected_day)
-    if expected_dt is None:
-        raise RuntimeError(f"Could not parse expected target-loot day: {expected_day}")
+    if not isinstance(meta, dict):
+        meta = {}
+    if not isinstance(events, dict):
+        raise RuntimeError("Target-looted events are missing.")
 
-    valid_entries: list[dict[str, Any]] = []
+    escalation = events.get("Escalation")
+    if not isinstance(escalation, list) or not escalation:
+        raise RuntimeError("Escalation data is missing from target_looted.")
 
-    for entry in escalation:
-        if not isinstance(entry, dict):
-            continue
+    source_day = str(meta.get("target_day", "")).strip()
+    source_week = str(meta.get("target_week", "")).strip()
 
-        missions = entry.get("missions")
+    # If the source ever omits target_day, fall back to the current Saudi date.
+    expected_day = source_day or target_loot_day()
+
+    matching_entries = [
+        entry for entry in escalation
+        if isinstance(entry, dict)
+        and (not source_week or str(entry.get("week", "")).strip() == source_week)
+    ]
+    if not matching_entries:
+        matching_entries = [entry for entry in escalation if isinstance(entry, dict)]
+
+    selected_entry: dict[str, Any] | None = None
+    selected_row: dict[str, Any] | None = None
+
+    # Prefer the exact day published by the target_looted database.
+    for entry in matching_entries:
         rows = entry.get("target_loot_by_day")
-        if not isinstance(missions, list) or not missions:
+        if not isinstance(rows, list):
             continue
-        if not isinstance(rows, list) or not rows:
-            continue
-
-        usable_rows = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            loot = row.get("target_loot")
-            if not isinstance(loot, list) or not loot:
-                continue
-            usable_rows.append(row)
-
-        if usable_rows:
-            valid_entries.append({**entry, "_usable_rows": usable_rows})
-
-    if not valid_entries:
-        raise RuntimeError("No usable escalation blocks found.")
-
-    # 1) If today's row exists, use the newest block that contains it.
-    exact_matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for entry in valid_entries:
-        for row in entry["_usable_rows"]:
             if str(row.get("day", "")).strip() == expected_day:
-                exact_matches.append((entry, row))
+                selected_entry = entry
+                selected_row = row
+                break
+        if selected_row is not None:
+            break
 
-    if exact_matches:
-        entry, row = max(
-            exact_matches,
-            key=lambda item: (
-                _entry_week_key(item[0]) or datetime.min,
-                max(
-                    (
-                        _parse_day(r.get("day")) or datetime.min
-                        for r in item[0]["_usable_rows"]
-                    ),
-                    default=datetime.min,
-                ),
-            ),
-        )
-    else:
-        # 2) No exact row: choose the CURRENT/LATEST escalation block first.
-        #    Never select a loot row globally and then combine it with another block's missions.
-        dated_entries = [
-            entry
-            for entry in valid_entries
-            if _entry_week_key(entry) is not None
-            and _entry_week_key(entry) <= expected_dt
-        ]
+    # If target_day is absent from rows, keep missions and loot in the same block
+    # and use the newest dated row from that block.
+    if selected_row is None:
+        best: tuple[datetime, dict[str, Any], dict[str, Any]] | None = None
+        for entry in matching_entries:
+            rows = entry.get("target_loot_by_day")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                loot = row.get("target_loot")
+                parsed = _parse_day(row.get("day"))
+                if not isinstance(loot, list) or not loot or parsed is None:
+                    continue
+                candidate = (parsed, entry, row)
+                if best is None or candidate[0] > best[0]:
+                    best = candidate
 
-        if dated_entries:
-            entry = max(dated_entries, key=lambda item: _entry_week_key(item) or datetime.min)
-        else:
-            # Fallback when the source omits/unparseably formats "week":
-            # choose the block whose own latest row is newest.
-            entry = max(
-                valid_entries,
-                key=lambda item: max(
-                    (
-                        _parse_day(r.get("day")) or datetime.min
-                        for r in item["_usable_rows"]
-                    ),
-                    default=datetime.min,
-                ),
-            )
+        if best is None:
+            raise RuntimeError("No usable target-loot row found.")
 
-        # Once the block is chosen, select loot ONLY from that same block.
-        dated_rows = [
-            row
-            for row in entry["_usable_rows"]
-            if _parse_day(row.get("day")) is not None
-        ]
-        eligible_rows = [
-            row
-            for row in dated_rows
-            if (_parse_day(row.get("day")) or datetime.min) <= expected_dt
-        ]
+        _, selected_entry, selected_row = best
 
-        if eligible_rows:
-            row = max(
-                eligible_rows,
-                key=lambda item: _parse_day(item.get("day")) or datetime.min,
-            )
-        elif dated_rows:
-            row = max(
-                dated_rows,
-                key=lambda item: _parse_day(item.get("day")) or datetime.min,
-            )
-        else:
-            row = entry["_usable_rows"][-1]
-
-    missions = [str(item).strip() for item in entry.get("missions", [])]
-    loot = [normalize_label(item) for item in row.get("target_loot", [])]
+    missions = [str(item).strip() for item in selected_entry.get("missions", [])]
+    loot = [normalize_label(item) for item in selected_row.get("target_loot", [])]
 
     if len(missions) != len(loot):
         raise RuntimeError(
-            "Escalation source mismatch: "
-            f"{len(missions)} missions but {len(loot)} target-loot entries "
-            f"in week {entry.get('week', 'unknown')} / day {row.get('day', 'unknown')}."
+            "Target-looted source mismatch: "
+            f"{len(missions)} missions but {len(loot)} loot entries."
         )
+
+    actual_row_day = str(selected_row.get("day", "")).strip() or expected_day
+    week = str(selected_entry.get("week", "")).strip() or source_week or "missing"
 
     return {
         "day": expected_day,
-        "source_day": str(row.get("day", "")).strip() or "missing",
-        "week": str(entry.get("week", "")).strip() or "missing",
+        "source_day": actual_row_day,
+        "week": week,
         "missions": [
             {"mission": mission, "loot": target}
             for mission, target in zip(missions, loot)
