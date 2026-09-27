@@ -1,0 +1,41 @@
+name: Diagnose hi-dep source
+
+on:
+  push:
+    paths:
+      - ".github/workflows/diagnose_source.yml"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch raw escalation block
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          from datetime import datetime, timezone
+
+          url = "https://hi-dep.github.io/division2/data/event/index.json?diag=" + datetime.now(timezone.utc).strftime("%s")
+          req = urllib.request.Request(url, headers={
+              "User-Agent": "Division2loot-diagnostic/1.0",
+              "Cache-Control": "no-cache",
+              "Pragma": "no-cache",
+          })
+          with urllib.request.urlopen(req, timeout=30) as r:
+              data = json.load(r)
+
+          print("ESCALATION_BLOCKS")
+          for i, entry in enumerate(data.get("Escalation", [])):
+              if not isinstance(entry, dict):
+                  continue
+              week = str(entry.get("week", ""))
+              rows = entry.get("target_loot_by_day", [])
+              days = [str(x.get("day", "")) for x in rows if isinstance(x, dict)]
+              if week == "2026-09-22" or any(d >= "2026-09-22" for d in days):
+                  print(json.dumps({
+                      "index": i,
+                      "week": week,
+                      "missions": entry.get("missions"),
+                      "target_loot_by_day": rows,
+                  }, ensure_ascii=False, indent=2))
+          PY
