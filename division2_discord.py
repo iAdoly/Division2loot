@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import gzip
-import io
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +14,8 @@ import requests
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
 
-TARGET_LOOT_URL = "https://hi-dep.github.io/division2/data/target_looted/target_looted_latest.json.gz"
+TARGET_LOOT_URL = "https://prototrack.gg/target-loot/target-loot-current.txt"
+TARGET_LOOT_PAGE_URL = "https://prototrack.gg/target-loot/target-loot.php"
 HTTP_TIMEOUT = 30
 SAUDI_TZ = ZoneInfo("Asia/Riyadh")
 
@@ -128,6 +128,37 @@ LOOT_NAME_ALIASES = {
     "Česká Výroba s.r.o.": "Ceska Vyroba s.r.o.",
 }
 
+PROTOTRACK_LABEL_ALIASES = {
+    "Assault Rifles": "Assault Rifle",
+    "Assault Rifle": "Assault Rifle",
+    "Light Machine Guns": "LMG",
+    "LMGs": "LMG",
+    "LMG": "LMG",
+    "Marksman Rifles": "Marksman Rifle",
+    "MMRs": "Marksman Rifle",
+    "Marksman Rifle": "Marksman Rifle",
+    "Pistols": "Pistol",
+    "Pistol": "Pistol",
+    "Rifles": "Rifle",
+    "Rifle": "Rifle",
+    "Shotguns": "Shotgun",
+    "Shotgun": "Shotgun",
+    "Submachine Guns": "SMG",
+    "SMGs": "SMG",
+    "SMG": "SMG",
+    "Masks": "Mask",
+    "Mask": "Mask",
+    "Backpacks": "Backpack",
+    "Backpack": "Backpack",
+    "Chest Pieces": "Body Armor",
+    "Chest": "Body Armor",
+    "Body Armor": "Body Armor",
+    "Gloves": "Gloves",
+    "Holsters": "Holster",
+    "Holster": "Holster",
+    "Kneepads": "Kneepads",
+}
+
 
 def load_config() -> dict[str, Any]:
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -140,6 +171,7 @@ def target_loot_day() -> str:
 def normalize_label(value: Any) -> str:
     raw = str(value or "").strip()
     label = TOKEN_LABELS.get(raw.lower(), raw or "N/A")
+    label = PROTOTRACK_LABEL_ALIASES.get(label, label)
     return LOOT_NAME_ALIASES.get(label, label)
 
 
@@ -153,150 +185,82 @@ def bilingual_loot(label: str) -> str:
     return f"{arabic} | {canonical}" if arabic else canonical
 
 
-def fetch_event() -> dict[str, Any]:
-    # Use the same current Target Loot database as the site's target_looted view.
-    cache_buster = int(datetime.now(SAUDI_TZ).timestamp())
+def fetch_event() -> str:
+    # ProtoTrack exposes a public Static Text endpoint specifically suited to
+    # automated consumers. Add a cache-buster so each scheduled run gets the
+    # freshest published rotation.
     response = requests.get(
         TARGET_LOOT_URL,
-        params={"ts": cache_buster},
+        params={"ts": int(datetime.now(SAUDI_TZ).timestamp())},
         timeout=HTTP_TIMEOUT,
         headers={
             "User-Agent": "Division2loot/1.0",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
+            "Accept": "text/plain,*/*;q=0.8",
         },
     )
     response.raise_for_status()
 
-    try:
-        raw = gzip.GzipFile(fileobj=io.BytesIO(response.content)).read()
-        data = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Invalid target_looted data from hi-dep.") from exc
+    text = response.text.strip()
+    if not text:
+        raise RuntimeError("ProtoTrack returned an empty Target Loot response.")
 
-    if not isinstance(data, dict):
-        raise RuntimeError("Target-looted payload is not an object.")
-
-    return data
+    return text
 
 
-def _parse_day(value: Any) -> datetime | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
+def select_event_snapshot(text: str) -> dict[str, Any]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    for fmt in (
-        "%Y-%m-%d",
-        "%d-%m-%Y",
-        "%Y/%m/%d",
-        "%d/%m/%Y",
-        "%b %d, %Y",
-        "%B %d, %Y",
-        "%d %b %Y",
-        "%d %B %Y",
-    ):
-        try:
-            return datetime.strptime(raw, fmt)
-        except ValueError:
-            pass
+    date_match = re.search(
+        r"(?:Daily\s+)?Escalation\s+Target\s+Loot\s+Date:\s*(\d{4}-\d{2}-\d{2})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not date_match:
+        raise RuntimeError("Could not find the ProtoTrack Target Loot date.")
 
-    return None
+    source_day = date_match.group(1)
 
+    section_match = re.search(
+        r"Missions:\s*(.*?)\s*Vendor\s+Caches:",
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not section_match:
+        raise RuntimeError("Could not find the ProtoTrack Missions section.")
 
-def _entry_week_key(entry: dict[str, Any]) -> datetime | None:
-    return _parse_day(entry.get("week"))
+    mission_section = section_match.group(1).strip()
+    parts = re.split(r"(?:^|\s)-\s+", mission_section)
 
-
-def select_event_snapshot(data: dict[str, Any]) -> dict[str, Any]:
-    meta = data.get("meta")
-    events = data.get("events")
-
-    if not isinstance(meta, dict):
-        meta = {}
-    if not isinstance(events, dict):
-        raise RuntimeError("Target-looted events are missing.")
-
-    escalation = events.get("Escalation")
-    if not isinstance(escalation, list) or not escalation:
-        raise RuntimeError("Escalation data is missing from target_looted.")
-
-    source_day = str(meta.get("target_day", "")).strip()
-    source_week = str(meta.get("target_week", "")).strip()
-
-    # If the source ever omits target_day, fall back to the current Saudi date.
-    expected_day = source_day or target_loot_day()
-
-    matching_entries = [
-        entry for entry in escalation
-        if isinstance(entry, dict)
-        and (not source_week or str(entry.get("week", "")).strip() == source_week)
-    ]
-    if not matching_entries:
-        matching_entries = [entry for entry in escalation if isinstance(entry, dict)]
-
-    selected_entry: dict[str, Any] | None = None
-    selected_row: dict[str, Any] | None = None
-
-    # Prefer the exact day published by the target_looted database.
-    for entry in matching_entries:
-        rows = entry.get("target_loot_by_day")
-        if not isinstance(rows, list):
+    missions: list[dict[str, str]] = []
+    for part in parts:
+        item = part.strip()
+        if not item or ":" not in item:
             continue
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("day", "")).strip() == expected_day:
-                selected_entry = entry
-                selected_row = row
-                break
-        if selected_row is not None:
-            break
 
-    # If target_day is absent from rows, keep missions and loot in the same block
-    # and use the newest dated row from that block.
-    if selected_row is None:
-        best: tuple[datetime, dict[str, Any], dict[str, Any]] | None = None
-        for entry in matching_entries:
-            rows = entry.get("target_loot_by_day")
-            if not isinstance(rows, list):
-                continue
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                loot = row.get("target_loot")
-                parsed = _parse_day(row.get("day"))
-                if not isinstance(loot, list) or not loot or parsed is None:
-                    continue
-                candidate = (parsed, entry, row)
-                if best is None or candidate[0] > best[0]:
-                    best = candidate
+        mission, loot = item.split(":", 1)
+        mission = mission.strip()
+        loot = loot.strip()
 
-        if best is None:
-            raise RuntimeError("No usable target-loot row found.")
+        if mission and loot:
+            missions.append({
+                "mission": mission,
+                "loot": normalize_label(loot),
+            })
 
-        _, selected_entry, selected_row = best
-
-    missions = [str(item).strip() for item in selected_entry.get("missions", [])]
-    loot = [normalize_label(item) for item in selected_row.get("target_loot", [])]
-
-    if len(missions) != len(loot):
+    if len(missions) != 5:
         raise RuntimeError(
-            "Target-looted source mismatch: "
-            f"{len(missions)} missions but {len(loot)} loot entries."
+            f"ProtoTrack source format changed: expected 5 missions, found {len(missions)}."
         )
 
-    actual_row_day = str(selected_row.get("day", "")).strip() or expected_day
-    week = str(selected_entry.get("week", "")).strip() or source_week or "missing"
-
     return {
-        "day": expected_day,
-        "source_day": actual_row_day,
-        "week": week,
-        "missions": [
-            {"mission": mission, "loot": target}
-            for mission, target in zip(missions, loot)
-        ],
+        "day": source_day,
+        "source_day": source_day,
+        "week": "ProtoTrack",
+        "missions": missions,
     }
+
 
 def loot_icon(label: str, config: dict[str, Any]) -> str:
     emojis = config.get("loot_emojis", {})
@@ -322,7 +286,7 @@ def build_message(event: dict[str, Any], config: dict[str, Any]) -> str:
         )
         lines.append("")
 
-    lines.append("-# Source: hi-dep Division 2")
+    lines.append("-# Source: ProtoTrack.gg")
     return "\n".join(lines).strip()[:2000]
 
 
