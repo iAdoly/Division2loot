@@ -2,6 +2,12 @@ name: Division 2 Discord Updater
 
 on:
   workflow_dispatch:
+    inputs:
+      force_resend:
+        description: "Force resend the current ProtoTrack source even if it is older or already sent"
+        required: false
+        type: boolean
+        default: false
   repository_dispatch:
     types: [cron_job_org]
 
@@ -19,10 +25,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore Target Loot state
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: target-loot-state-${{ github.run_id }}
+          restore-keys: |
+            target-loot-state-
+
       - name: Install dependency
         run: python -m pip install -r requirements.txt
 
       - name: Post Escalation Target Loot
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          FORCE_RESEND: ${{ github.event_name == 'workflow_dispatch' && inputs.force_resend || false }}
         run: python division2_discord.py
