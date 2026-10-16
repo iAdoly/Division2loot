@@ -254,9 +254,20 @@ def select_event_snapshot(text: str) -> dict[str, Any]:
             f"ProtoTrack source format changed: expected 5 missions, found {len(missions)}."
         )
 
+    last_updated_match = re.search(
+        r"Last\s+updated:\s*([^\n]+)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+
     return {
         "day": source_day,
         "source_day": source_day,
+        "source_last_updated": (
+            last_updated_match.group(1).strip()
+            if last_updated_match
+            else None
+        ),
         "week": "ProtoTrack",
         "missions": missions,
     }
@@ -311,9 +322,76 @@ def send_webhook(content: str, config: dict[str, Any]) -> None:
         )
 
 
+def send_status_safely(content: str, config: dict[str, Any]) -> None:
+    try:
+        send_webhook(content, config)
+    except Exception as status_exc:
+        print(
+            f"WARNING: Could not send Discord status message: {status_exc}",
+            file=sys.stderr,
+        )
+
+
 def main() -> int:
     config = load_config()
-    event = select_event_snapshot(fetch_event())
+    today = target_loot_day()
+
+    try:
+        event = select_event_snapshot(fetch_event())
+    except Exception as exc:
+        reason = str(exc).replace("`", "'").strip()[:350] or "Unknown error"
+        send_status_safely(
+            "\n".join(
+                [
+                    "⚠️ **Target Loot update failed**",
+                    "Could not load today's Target Loot from ProtoTrack.",
+                    "**No previous-day loot was posted.**",
+                    f"Reason: `{reason}`",
+                ]
+            ),
+            config,
+        )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    source_day = str(event["source_day"])
+
+    if source_day < today:
+        lines = [
+            "ℹ️ **Target Loot not updated yet**",
+            f"ProtoTrack is still showing **{source_day}**.",
+            f"Expected today: **{today}**.",
+            "**No previous-day loot was posted.**",
+        ]
+        if event.get("source_last_updated"):
+            lines.append(
+                f"Source last updated: **{event['source_last_updated']}**"
+            )
+        send_status_safely("\n".join(lines), config)
+        print(
+            "Skipped stale Target Loot: "
+            f"source day {source_day}, expected {today}."
+        )
+        return 0
+
+    if source_day > today:
+        message = (
+            "ProtoTrack returned an unexpected future Target Loot date: "
+            f"{source_day} (expected {today})."
+        )
+        send_status_safely(
+            "\n".join(
+                [
+                    "⚠️ **Target Loot data is invalid**",
+                    message,
+                    "**No Target Loot was posted.**",
+                ]
+            ),
+            config,
+        )
+        print(f"ERROR: {message}", file=sys.stderr)
+        return 1
+
     send_webhook(build_message(event, config), config)
     print(
         "Posted Escalation Target Loot "
