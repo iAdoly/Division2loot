@@ -381,6 +381,12 @@ def send_status_safely(content: str, config: dict[str, Any]) -> None:
 def main() -> int:
     config = load_config()
     today = target_loot_day()
+    force_resend = os.environ.get("FORCE_RESEND", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     try:
         event = select_event_snapshot(fetch_event())
@@ -402,7 +408,7 @@ def main() -> int:
 
     source_day = str(event["source_day"])
 
-    if source_day < today:
+    if source_day < today and not force_resend:
         lines = [
             "ℹ️ **Target Loot not updated yet**",
             f"ProtoTrack is still showing **{source_day}**.",
@@ -419,6 +425,12 @@ def main() -> int:
             f"source day {source_day}, expected {today}."
         )
         return 0
+
+    if source_day < today and force_resend:
+        print(
+            "FORCE_RESEND enabled: manually resending ProtoTrack source day "
+            f"{source_day} although current Saudi date is {today}."
+        )
 
     if source_day > today:
         message = (
@@ -442,7 +454,8 @@ def main() -> int:
     state = load_state()
 
     if (
-        state.get("source_day") == source_day
+        not force_resend
+        and state.get("source_day") == source_day
         and state.get("signature") == signature
     ):
         lines = [
