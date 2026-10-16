@@ -202,6 +202,25 @@ class TargetLootPolicyTests(unittest.TestCase):
 
 
 class ParserTests(unittest.TestCase):
+    def test_prototrack_name_variants_reuse_existing_translation_and_emoji(self):
+        raw = source_text().replace(
+            "Striker's Battlegear", "Negotiators Dilemma"
+        ).replace("China Light Industries Corporation", "Shiny Monkey Gear")
+        event = bot.select_event_snapshot(raw)
+        message = bot.build_message(event, bot.load_config())
+        self.assertEqual(event["missions"][1]["loot"], "Shiny Monkey")
+        self.assertEqual(event["missions"][2]["loot"], "Negotiator's Dilemma")
+        self.assertIn("<:negotiators_dilemma:1550647659788898324>", message)
+        self.assertIn("معضلة المفاوض | Negotiator's Dilemma", message)
+        self.assertIn("عتاد القرد اللامع | Shiny Monkey", message)
+        canonical = raw.replace("Negotiators Dilemma", "Negotiator's Dilemma").replace(
+            "Shiny Monkey Gear", "Shiny Monkey"
+        )
+        self.assertEqual(
+            bot.event_signature(event),
+            bot.event_signature(bot.select_event_snapshot(canonical)),
+        )
+
     def test_parser_preserves_aliases_and_ignores_vendor_caches(self):
         event = bot.select_event_snapshot(source_text().replace("\n", "\r\n"))
         self.assertEqual(event["source_day"], TODAY)

@@ -79,6 +79,8 @@ Example:
 
 If an item has no configured emoji, the bilingual loot name is still posted normally.
 
+See [the complete emoji coverage audit](docs/emoji-coverage.md) for all supported names, missing mappings, and source-name aliases. Missing mappings require the actual Discord emoji codes; screenshots alone do not provide those IDs.
+
 ## Files
 
 - `division2_discord.py` — bot logic

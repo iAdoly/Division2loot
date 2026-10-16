@@ -127,6 +127,8 @@ GEAR_SET_AR = {
 LOOT_NAME_ALIASES = {
     "China Light Industries Corporation": "China Light Industries",
     "Legatus S.p.A.": "Legatus S.p.A",
+    "Negotiators Dilemma": "Negotiator's Dilemma",
+    "Shiny Monkey Gear": "Shiny Monkey",
     "Česká Výroba s.r.o.": "Ceska Vyroba s.r.o.",
 }
 
