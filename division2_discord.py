@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
+STATE_PATH = ROOT / ".state" / "target_loot.json"
 
 TARGET_LOOT_URL = "https://prototrack.gg/target-loot/target-loot-current.txt"
 TARGET_LOOT_PAGE_URL = "https://prototrack.gg/target-loot/target-loot.php"
@@ -166,6 +168,50 @@ def load_config() -> dict[str, Any]:
 
 def target_loot_day() -> str:
     return datetime.now(SAUDI_TZ).strftime("%Y-%m-%d")
+
+
+def event_signature(event: dict[str, Any]) -> str:
+    payload = {
+        "day": str(event["source_day"]),
+        "missions": [
+            {
+                "mission": str(row["mission"]),
+                "loot": str(row["loot"]),
+            }
+            for row in event["missions"]
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def load_state() -> dict[str, Any]:
+    if not STATE_PATH.exists():
+        return {}
+    try:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def save_state(event: dict[str, Any], signature: str) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "source_day": str(event["source_day"]),
+        "signature": signature,
+        "source_last_updated": event.get("source_last_updated"),
+        "saved_at": datetime.now(SAUDI_TZ).isoformat(timespec="seconds"),
+    }
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def normalize_label(value: Any) -> str:
@@ -392,11 +438,36 @@ def main() -> int:
         print(f"ERROR: {message}", file=sys.stderr)
         return 1
 
+    signature = event_signature(event)
+    state = load_state()
+
+    if (
+        state.get("source_day") == source_day
+        and state.get("signature") == signature
+    ):
+        lines = [
+            "ℹ️ **No new Target Loot update**",
+            "The latest version is already loaded.",
+            f"Date: **{source_day}**",
+        ]
+        if event.get("source_last_updated"):
+            lines.append(
+                f"Source last updated: **{event['source_last_updated']}**"
+            )
+        send_status_safely("\n".join(lines), config)
+        print(
+            "Skipped duplicate Target Loot version "
+            f"for {source_day} ({signature[:12]})."
+        )
+        return 0
+
     send_webhook(build_message(event, config), config)
+    save_state(event, signature)
     print(
         "Posted Escalation Target Loot "
         f"for {event['day']} "
-        f"(source week: {event['week']}, source day: {event['source_day']})."
+        f"(source week: {event['week']}, source day: {event['source_day']}, "
+        f"signature: {signature[:12]})."
     )
     return 0
 
