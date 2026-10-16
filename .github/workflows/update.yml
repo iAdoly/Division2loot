@@ -11,6 +11,11 @@ on:
   repository_dispatch:
     types: [cron_job_org]
 
+# Finish posting and saving state before another run restores that state.
+concurrency:
+  group: division2-target-loot
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -29,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .state
-          key: target-loot-state-${{ github.run_id }}
+          key: target-loot-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             target-loot-state-
 

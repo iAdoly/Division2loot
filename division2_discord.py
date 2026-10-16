@@ -127,6 +127,8 @@ GEAR_SET_AR = {
 LOOT_NAME_ALIASES = {
     "China Light Industries Corporation": "China Light Industries",
     "Legatus S.p.A.": "Legatus S.p.A",
+    "Negotiators Dilemma": "Negotiator's Dilemma",
+    "Shiny Monkey Gear": "Shiny Monkey",
     "Česká Výroba s.r.o.": "Ceska Vyroba s.r.o.",
 }
 
@@ -381,12 +383,16 @@ def send_status_safely(content: str, config: dict[str, Any]) -> None:
 def main() -> int:
     config = load_config()
     today = target_loot_day()
-    force_resend = os.environ.get("FORCE_RESEND", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    # The stale/duplicate override is reserved for an explicit manual workflow.
+    force_resend = (
+        os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+        and os.environ.get("FORCE_RESEND", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    )
 
     try:
         event = select_event_snapshot(fetch_event())
