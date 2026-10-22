@@ -182,6 +182,10 @@ def event_signature(event: dict[str, Any]) -> str:
             }
             for row in event["missions"]
         ],
+        "vendor": {
+            str(key): str(value)
+            for key, value in (event.get("vendor") or {}).items()
+        },
     }
     encoded = json.dumps(
         payload,
@@ -260,10 +264,12 @@ def fetch_event() -> str:
 def select_event_snapshot(text: str) -> dict[str, Any]:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
 
+    # Current ProtoTrack static-text format:
+    # Daily Escalation Target Loot
+    # Date: YYYY-MM-DD
     date_match = re.search(
-        r"(?:Daily\s+)?Escalation\s+Target\s+Loot\s+Date:\s*(\d{4}-\d{2}-\d{2})",
+        r"(?mi)^Date:\s*(\d{4}-\d{2}-\d{2})\s*$",
         normalized,
-        flags=re.IGNORECASE,
     )
     if not date_match:
         raise RuntimeError("Could not find the ProtoTrack Target Loot date.")
@@ -271,20 +277,20 @@ def select_event_snapshot(text: str) -> dict[str, Any]:
     source_day = date_match.group(1)
 
     section_match = re.search(
-        r"Missions:\s*(.*?)\s*Vendor\s+Caches:",
+        r"(?ms)^Missions:\s*\n(.*?)(?=^Vendor\s+Caches:\s*$)",
         normalized,
-        flags=re.IGNORECASE | re.DOTALL,
     )
     if not section_match:
         raise RuntimeError("Could not find the ProtoTrack Missions section.")
 
-    mission_section = section_match.group(1).strip()
-    parts = re.split(r"(?:^|\s)-\s+", mission_section)
-
     missions: list[dict[str, str]] = []
-    for part in parts:
-        item = part.strip()
-        if not item or ":" not in item:
+    for raw_line in section_match.group(1).splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- "):
+            continue
+
+        item = line[2:].strip()
+        if ":" not in item:
             continue
 
         mission, loot = item.split(":", 1)
@@ -302,10 +308,40 @@ def select_event_snapshot(text: str) -> dict[str, Any]:
             f"ProtoTrack source format changed: expected 5 missions, found {len(missions)}."
         )
 
-    last_updated_match = re.search(
-        r"Last\s+updated:\s*([^\n]+)",
+    vendor_match = re.search(
+        r"(?ms)^Vendor\s+Caches:\s*\n(.*?)(?=^Last\s+updated:|^Source:|\Z)",
         normalized,
-        flags=re.IGNORECASE,
+    )
+    if not vendor_match:
+        raise RuntimeError("Could not find the ProtoTrack Vendor Caches section.")
+
+    vendor: dict[str, str] = {}
+    for raw_line in vendor_match.group(1).splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- "):
+            continue
+
+        item = line[2:].strip()
+        if ":" not in item:
+            continue
+
+        cache_type, loot = item.split(":", 1)
+        key = cache_type.strip().lower()
+        loot = loot.strip()
+
+        if key in {"weapons", "weapon"} and loot:
+            vendor["weapon"] = normalize_label(loot)
+        elif key in {"gear", "gears"} and loot:
+            vendor["gear"] = normalize_label(loot)
+
+    if set(vendor) != {"weapon", "gear"}:
+        raise RuntimeError(
+            "ProtoTrack source format changed: expected both Weapons and Gear vendor caches."
+        )
+
+    last_updated_match = re.search(
+        r"(?mi)^Last\s+updated:\s*([^\n]+)$",
+        normalized,
     )
 
     return {
@@ -318,8 +354,8 @@ def select_event_snapshot(text: str) -> dict[str, Any]:
         ),
         "week": "ProtoTrack",
         "missions": missions,
+        "vendor": vendor,
     }
-
 
 def loot_icon(label: str, config: dict[str, Any]) -> str:
     emojis = config.get("loot_emojis", {})
@@ -345,9 +381,30 @@ def build_message(event: dict[str, Any], config: dict[str, Any]) -> str:
         )
         lines.append("")
 
+    vendor = event.get("vendor") or {}
+    weapon_loot = str(vendor.get("weapon") or "").strip()
+    gear_loot = str(vendor.get("gear") or "").strip()
+
+    if weapon_loot and gear_loot:
+        lines.append("**Escalation Requisition Vendor | بائع متطلبات التصعيد**")
+
+        weapon_icon = loot_icon(weapon_loot, config)
+        weapon_prefix = f"{weapon_icon} " if weapon_icon else ""
+        lines.append(
+            f"**Prototype Weapon Cache | مخبأ الأسلحة** — "
+            f"{weapon_prefix}{bilingual_loot(weapon_loot)}"
+        )
+
+        gear_icon = loot_icon(gear_loot, config)
+        gear_prefix = f"{gear_icon} " if gear_icon else ""
+        lines.append(
+            f"**Prototype Gear Cache | مخبأ العتاد** — "
+            f"{gear_prefix}{bilingual_loot(gear_loot)}"
+        )
+        lines.append("")
+
     lines.append("-# Source: ProtoTrack.gg")
     return "\n".join(lines).strip()[:2000]
-
 
 def send_webhook(content: str, config: dict[str, Any]) -> None:
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
